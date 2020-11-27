@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:indjcollectinglocationdata/network/websocket.dart';
 import 'package:naver_map_plugin/naver_map_plugin.dart';
 
+import 'package:uuid/uuid.dart';
+
 class MarkerMapPage extends StatefulWidget {
   @override
   _MarkerMapPageState createState() => _MarkerMapPageState();
@@ -14,65 +16,48 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
   static const MODE_ADD = 0xF1;
   static const MODE_REMOVE = 0xF2;
   static const MODE_NONE = 0xF3;
+  static const MODE_HIDE_MARKER = 0xF4;
+  static final _formKey = GlobalKey<FormState>();
 
   static const LOCATION_LIST = <String>['은행', '마트', '병원', '카페', '편의점', '식당', '직장', '집'];
 
-  int _currentMode = MODE_NONE;
-
   Completer<NaverMapController> _controller = Completer();
+
+  Map<String, dynamic> _mapConfiguration = {
+    'currentMode': MODE_NONE,
+    'hide_markers': false,
+  };
+
   List<Marker> _markers = [];
   List<CircleOverlay> _circles = [];
   List<LocationType> _locationTypes = [];
+  List<String> _locationNames = [];
 
   double _sliderValue = 20.0;
   int _selectedCircleIndex;
   Timer _timer;
-  List<dynamic> tData = [];
+
   WebSocket websocket;
 
   String dropdownValue = '은행';
 
+  FocusNode focusNode;
+
   @override
   void initState() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      OverlayImage.fromAssetImage(ImageConfiguration(), 'icon/marker.png').then((image) {
-        // setState(() {
-        //   _markers.add(Marker(
-        //       markerId: 'id',
-        //       position: LatLng(37.563600, 126.962370),
-        //       captionText: "커스텀 아이콘",
-        //       captionColor: Colors.indigo,
-        //       captionTextSize: 20.0,
-        //       alpha: 0.8,
-        //       icon: image,
-        //       width: 45,
-        //       height: 45,
-        //       infoWindow: '인포 윈도우',
-        //       onMarkerTab: _onMarkerTap
-        //   ));
-        // });
-      });
+      OverlayImage.fromAssetImage(ImageConfiguration(), 'icon/marker.png').then((image) {});
     });
     super.initState();
-    websocket = WebSocket();
-    websocket.initWebSocket();
+    _configureWebsocket();
+    focusNode = FocusNode();
+  }
 
-    _timer = Timer.periodic(Duration(seconds: 10), (timer) {
-      List<dynamic> data = [];
-      for(int i = 0; i < _markers.length; i++){
-        data.add({
-          'len': _markers.length,
-          'id': _markers[i].markerId,
-          'latitude': _markers[i].position.latitude,
-          'longitude': _markers[i].position.longitude,
-          'radius': _circles[i].radius,
-          'type': _locationTypes[i].type,
-          'time': new DateTime.now().toString()
-        });
-      }
-      // jsonEncode(data);
-      websocket.sendData(jsonEncode(data));
-    });
+  @override
+  void dispose() {
+    // TODO: implement dispose
+    focusNode.dispose();
+    super.dispose();
   }
 
   @override
@@ -83,22 +68,69 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
           children: <Widget>[
             _controlPanel(),
             _naverMap(),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: <Widget>[
-                _circlePanel(),
-                _selectBox()
-              ],
-            ),
-            Text(tData.toString())
+            _locationInputForm(),
           ],
         ),
       ),
     );
   }
 
+  _locationInputForm(){
+    if(_mapConfiguration['currentMode'] == MODE_ADD){
+      return Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 0),
+              child: TextFormField(
+                focusNode: focusNode,
+                decoration: InputDecoration(
+                  hintText: '위치를 입력해주세요',
+                ),
+                onTap: () => focusNode.requestFocus(),
+                onChanged: (text){
+                  setState(() {
+                    _locationNames[_selectedCircleIndex] = text;
+                  });
+                },
+              ),
+            ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: <Widget>[
+                _circlePanel(),
+                _selectBox(),
+              ],
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16.0),
+                  child: RaisedButton(
+                    onPressed: () {
+                      _sendDataToServer();
+                      setState(() {
+                        _mapConfiguration['currentMode'] = MODE_NONE;
+                      });
+                    },
+                    child: Text('완료'),
+                  ),
+                ),
+              ],
+            )
+          ],
+        ),
+      );
+    } else {
+      return Container();
+    }
+  }
+
   _selectBox() {
-    if(_currentMode == MODE_ADD){
       return DropdownButton<String>(
         value: dropdownValue,
         icon: Icon(Icons.arrow_downward),
@@ -118,13 +150,9 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
           );
         }).toList(),
       );
-    }else {
-      return Container();
-    }
   }
 
   _circlePanel(){
-    if(_currentMode == MODE_ADD){
       return Container(
         child: Align(
           alignment: Alignment.bottomCenter,
@@ -146,9 +174,7 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: <Widget>[
-                  Text(
-                      "반지름"
-                  ),
+                  Text("반경"),
                   SizedBox(width: 4),
                   Expanded(
                     child: Slider.adaptive(
@@ -164,11 +190,8 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
           ),
         ),
       );
-    } else {
-      return Container();
     }
 
-  }
 
   _controlPanel() {
     return Container(
@@ -179,10 +202,10 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
           // 추가
           Expanded(
             child: GestureDetector(
-              onTap: () => setState(() => _currentMode = MODE_ADD),
+              onTap: () => setState(() => _mapConfiguration['currentMode'] = MODE_ADD),
               child: Container(
                 decoration: BoxDecoration(
-                    color: _currentMode == MODE_ADD
+                    color: _mapConfiguration['currentMode'] == MODE_ADD
                         ? Colors.black : Colors.white,
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: Colors.black)
@@ -193,7 +216,7 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
                   '추가',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: _currentMode == MODE_ADD
+                    color: _mapConfiguration['currentMode'] == MODE_ADD
                         ? Colors.white : Colors.black,
                     fontWeight: FontWeight.w600,
                     fontSize: 14,
@@ -206,10 +229,10 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
           // 삭제
           Expanded(
             child: GestureDetector(
-              onTap: () => setState(() => _currentMode = MODE_REMOVE),
+              onTap: () => setState(() => _mapConfiguration['currentMode'] = MODE_REMOVE),
               child: Container(
                 decoration: BoxDecoration(
-                    color: _currentMode == MODE_REMOVE
+                    color: _mapConfiguration['currentMode'] == MODE_REMOVE
                         ? Colors.black : Colors.white,
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: Colors.black)
@@ -220,8 +243,39 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
                   '삭제',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: _currentMode == MODE_REMOVE
+                    color: _mapConfiguration['currentMode'] == MODE_REMOVE
                         ? Colors.white : Colors.black,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // 마커 숨기기
+          Expanded(
+            child: GestureDetector(
+              onTap: (){
+                if(!_mapConfiguration['hide_markers']){
+                  setState(()=>_mapConfiguration['hide_markers'] = true);
+                } else {
+                  setState(()=>_mapConfiguration['hide_markers'] = false);
+                }
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                    color: _mapConfiguration['hide_markers'] ? Colors.black : Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.black)
+                ),
+                padding: EdgeInsets.all(8),
+                margin: EdgeInsets.only(right: 8),
+                child: Text(
+                  '마커 숨기기',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: _mapConfiguration['hide_markers'] ? Colors.white : Colors.black,
                     fontWeight: FontWeight.w600,
                     fontSize: 14,
                   ),
@@ -232,18 +286,21 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
 
           // none
           GestureDetector(
-            onTap: () => setState(() => _currentMode = MODE_NONE),
+            onTap: (){
+              setState(() {
+                _mapConfiguration['currentMode'] = MODE_NONE;
+              });
+            },
             child: Container(
               decoration: BoxDecoration(
-                  color: _currentMode == MODE_NONE
-                      ? Colors.black : Colors.white,
+                  color: _mapConfiguration['currentMode'] == MODE_NONE ? Colors.black : Colors.white,
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(color: Colors.black)
               ),
               padding: EdgeInsets.all(4),
               child: Icon(
                 Icons.clear,
-                color: _currentMode == MODE_NONE
+                color: _mapConfiguration['currentMode'] == MODE_NONE
                     ? Colors.white : Colors.black,
               ),
             ),
@@ -254,23 +311,43 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
   }
 
   _naverMap() {
-    return Expanded(
-      child: Stack(
-        children: <Widget>[
-          NaverMap(
-            onMapCreated: _onMapCreated,
-            onMapTap: _onMapTap,
-            markers: _markers,
-            circles: _circles,
-            initialCameraPosition: CameraPosition(
-                target: LatLng(37.566570, 126.978442),
-                zoom: 18
+    if(_mapConfiguration['hide_markers']){
+      return Expanded(
+        child: Stack(
+          children: <Widget>[
+            NaverMap(
+              onMapCreated: _onMapCreated,
+              onMapTap: _onMapTap,
+              markers: [],
+              circles: [],
+              initialCameraPosition: CameraPosition(
+                  target: LatLng(37.566570, 126.978442),
+                  zoom: 18
+              ),
+              initLocationTrackingMode: LocationTrackingMode.Follow,
             ),
-            initLocationTrackingMode: LocationTrackingMode.Follow,
-          ),
-        ],
-      ),
-    );
+          ],
+        ),
+      );
+    } else {
+      return Expanded(
+        child: Stack(
+          children: <Widget>[
+            NaverMap(
+              onMapCreated: _onMapCreated,
+              onMapTap: _onMapTap,
+              markers: _markers,
+              circles: _circles,
+              initialCameraPosition: CameraPosition(
+                  target: LatLng(37.566570, 126.978442),
+                  zoom: 18
+              ),
+              initLocationTrackingMode: LocationTrackingMode.Follow,
+            ),
+          ],
+        ),
+      );
+    }
   }
 
 
@@ -285,8 +362,8 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
       _circles[_selectedCircleIndex].color = Colors.black.withOpacity(0.3);
     }
 
-    if (_currentMode == MODE_ADD) {
-      String id = DateTime.now().toIso8601String();
+    if (_mapConfiguration['currentMode'] == MODE_ADD) {
+      String id = Uuid().v4();
       setState(() {
         _markers.add(Marker(
           markerId: id,
@@ -304,18 +381,27 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
           outlineWidth: 1,
         ));
         _locationTypes.add(LocationType(id, dropdownValue));
-        _selectedCircleIndex = _circles.length -1;
+        _locationNames.add('이름을 입력해주세요');
       });
+
+      if(_selectedCircleIndex == null){
+        setState(() {
+          _selectedCircleIndex = 0;
+        });
+      } else {
+        setState(() {
+          _selectedCircleIndex = _circles.length -1;
+        });
+      }
     }
   }
 
   void _onMarkerTap(Marker marker, Map<String, int> iconSize) {
-    if (_currentMode == MODE_REMOVE){
+    if (_mapConfiguration['currentMode'] == MODE_REMOVE){
       setState(() {
         _markers.removeWhere((m) => m.markerId == marker.markerId);
         _circles.removeWhere((m) => m.overlayId == marker.markerId);
         _locationTypes.removeWhere((m) => m.id == marker.markerId);
-
         _selectedCircleIndex = null;
       });
     }
@@ -324,6 +410,7 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
   void _onSliderChange(double value) {
     setState(() {
       _sliderValue = value;
+      _circles[_selectedCircleIndex].radius = value;
     });
   }
 
@@ -367,8 +454,28 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
         dropdownValue = newValue;
       });
   }
-}
 
+  void _configureWebsocket(){
+    websocket = WebSocket();
+    websocket.initWebSocket();
+  }
+
+  void _sendDataToServer(){
+    List<dynamic> data = [];
+    for(int i = 0; i < _markers.length; i++){
+      data.add({
+        'id': Uuid().v4(),
+        'latitude': _markers[i].position.latitude,
+        'longitude': _markers[i].position.longitude,
+        'radius': _circles[i].radius,
+        'type': _locationTypes[i].type,
+        'name': _locationNames[i],
+        'time': new DateTime.now().toString()
+      });
+    }
+    websocket.sendData(jsonEncode(data));
+  }
+}
 
 class LocationType{
   String id;
