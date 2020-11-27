@@ -455,9 +455,12 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
       });
   }
 
-  void _configureWebsocket(){
+  void _configureWebsocket() async {
     websocket = WebSocket();
     websocket.initWebSocket();
+    var data = await websocket.receiveData();
+    // _set_initial_marker(data);
+    print(data);
   }
 
   void _sendDataToServer(){
@@ -474,6 +477,32 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
       });
     }
     websocket.sendData(jsonEncode(data));
+  }
+
+  void _set_initial_marker(dynamic data) {
+    print(data);
+    for(int i = 0; i < data.length; i++){
+      // print('${i}번, ${data[i]}');
+      setState(() {
+        _markers.add(Marker(
+          markerId: data[i].id,
+          position: LatLng(data[i].latitude, data[i].longitude),
+          infoWindow: data[i].name,
+          onMarkerTab: _onMarkerTap,
+        ));
+        _circles.add(CircleOverlay(
+          overlayId: data[i].id,
+          center: LatLng(data[i].latitude, data[i].longitude),
+          radius: data[i].radius,
+          onTap: _onCircleTap,
+          color: Colors.blueAccent.withOpacity(0.3),
+          outlineColor: Colors.black,
+          outlineWidth: 1,
+        ));
+        _locationTypes.add(LocationType(data[i].id, data[i].type));
+        _locationNames.add(data[i].name);
+      });
+    }
   }
 }
 

@@ -2,6 +2,8 @@ import 'package:indjcollectinglocationdata/marker_map_page.dart';
 import 'package:naver_map_plugin/naver_map_plugin.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
+import 'dart:convert';
+
 
 class WebSocket {
   IO.Socket socket;
@@ -15,10 +17,13 @@ class WebSocket {
   }
 
   sendData(var data) {
-    socket.emit('data', data);
+    socket.emit('mobile/send/data', data);
   }
-  // sendData_test(){
-  //   String data = '클라이언트 테스트';
-  //   socket.emit('data', data);
-  // }
+
+  Future<dynamic> receiveData(){
+    socket.on('server/send/data', (data){
+      // print('Future, ${data}');
+      return data;
+    });
+  }
 }
