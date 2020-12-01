@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'marker_map_page.dart';
+import 'polygon_map_page.dart';
 
 void main() {
   runApp(MyApp());
@@ -29,6 +30,7 @@ class MainPage extends StatefulWidget {
 class _MainPageState extends State<MainPage> {
   List<String> menuText = [
     '위치 정보 수집',
+    '도형'
   ];
 
   @override
@@ -70,6 +72,11 @@ class _MainPageState extends State<MainPage> {
       case 0:
         Navigator.push(context, MaterialPageRoute(
           builder: (context) => MarkerMapPage(),
+        ));
+        break;
+      case 1:
+        Navigator.push(context, MaterialPageRoute(
+          builder: (context) => PolygonMap()
         ));
         break;
     }

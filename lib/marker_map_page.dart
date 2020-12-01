@@ -6,6 +6,7 @@ import 'package:indjcollectinglocationdata/network/websocket.dart';
 import 'package:naver_map_plugin/naver_map_plugin.dart';
 
 import 'package:uuid/uuid.dart';
+import 'package:http/http.dart' as http;
 
 class MarkerMapPage extends StatefulWidget {
   @override
@@ -50,6 +51,7 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
     });
     super.initState();
     _configureWebsocket();
+    _set_initial_marker();
     focusNode = FocusNode();
   }
 
@@ -458,9 +460,6 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
   void _configureWebsocket() async {
     websocket = WebSocket();
     websocket.initWebSocket();
-    var data = await websocket.receiveData();
-    // _set_initial_marker(data);
-    print(data);
   }
 
   void _sendDataToServer(){
@@ -470,7 +469,7 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
         'id': Uuid().v4(),
         'latitude': _markers[i].position.latitude,
         'longitude': _markers[i].position.longitude,
-        'radius': _circles[i].radius,
+        'radius': _circles[i].radius.toStringAsFixed(3),
         'type': _locationTypes[i].type,
         'name': _locationNames[i],
         'time': new DateTime.now().toString()
@@ -479,30 +478,37 @@ class _MarkerMapPageState extends State<MarkerMapPage> {
     websocket.sendData(jsonEncode(data));
   }
 
-  void _set_initial_marker(dynamic data) {
-    print(data);
+  void _set_initial_marker() async {
+    var data = await _getLocationData();
     for(int i = 0; i < data.length; i++){
-      // print('${i}번, ${data[i]}');
+      print('${i}번, ${data[i]}');
       setState(() {
         _markers.add(Marker(
-          markerId: data[i].id,
-          position: LatLng(data[i].latitude, data[i].longitude),
-          infoWindow: data[i].name,
+          markerId: data[i]['id'],
+          position: LatLng(data[i]['latitude'], data[i]['longitude']),
+          infoWindow: data[i]['name'],
           onMarkerTab: _onMarkerTap,
         ));
         _circles.add(CircleOverlay(
-          overlayId: data[i].id,
-          center: LatLng(data[i].latitude, data[i].longitude),
-          radius: data[i].radius,
+          overlayId: data[i]['id'],
+          center: LatLng(data[i]['latitude'], data[i]['longitude']),
+          radius: double.parse(data[i]['radius'].toString()),
           onTap: _onCircleTap,
           color: Colors.blueAccent.withOpacity(0.3),
           outlineColor: Colors.black,
           outlineWidth: 1,
         ));
-        _locationTypes.add(LocationType(data[i].id, data[i].type));
-        _locationNames.add(data[i].name);
+        _locationTypes.add(LocationType(data[i]['id'], data[i]['type']));
+        _locationNames.add(data[i]['name']);
       });
     }
+  }
+
+   _getLocationData() async {
+    String url = 'http://3.34.179.171:3000/location/data';
+    var response = await http.get(url);
+    List<dynamic> parsed_data = jsonDecode(response.body);
+    return parsed_data;
   }
 }
 
